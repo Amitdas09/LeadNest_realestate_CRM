@@ -28,10 +28,7 @@ tap-to-answer questionnaire, and land in your team's inbox already scored and as
 - [How it works](#how-it-works)
   - [System architecture](#system-architecture)
   - [Lead lifecycle](#lead-lifecycle)
-  - [WhatsApp question flow](#whatsapp-question-flow)
-  - [Conversation states](#conversation-states)
-  - [Data model](#data-model)
-- [Design principles](#design-principles)
+  - [Lead scoring](#lead-scoring)
 - [Tech stack](#tech-stack)
 - [Project structure](#project-structure)
 - [Getting started](#getting-started)
@@ -199,31 +196,9 @@ sequenceDiagram
     end
 ```
 
-### WhatsApp question flow
+### Lead scoring
 
-Each Meta form maps to a property and a question flow. Every answer is a tap; each button decides
-where the chat goes next. Flows are fully editable in **Forms & flows**.
-
-```mermaid
-flowchart TD
-    T["Opening template"] -->|Yes, go ahead| I["Property card + Q1"]
-    T -->|Not now| N["Status: Nurture"]
-    T -->|Stop| X["Unsubscribed"]
-
-    I --> Q1{"Home size<br/>2 BHK · 3 BHK · 4 BHK+"}
-    Q1 --> Q2{"Budget<br/>< ₹80 L · ₹80 L–1.2 Cr · > ₹1.2 Cr"}
-    Q2 --> Q3{"Buying timeline<br/>Within 3 months · 3–6 months · Exploring"}
-    Q3 --> Q4{"How can we help?"}
-    Q4 -->|Book site visit| V{"Visit day<br/>Weekend · Weekday · Call to fix"}
-    Q4 -->|Call me| K{"Best time to call<br/>Morning · Afternoon · Evening"}
-    Q4 -->|Send details| D["Property details + brochure"]
-    V --> END["Closing message"]
-    K --> END
-    D --> END
-    END --> S["Scored · assigned · follow-up created"]
-```
-
-**Scoring rules (editable):**
+After the last answer, each lead is scored automatically (rules are editable in **Forms & flows**):
 
 | Priority | Rule |
 |---|---|
@@ -231,80 +206,6 @@ flowchart TD
 | 🟠 **Warm** | Buying within 6 months |
 | 🔵 **Cold** | Everything else |
 | ↓ | Budget below the property's starting price drops the lead one level |
-
-### Conversation states
-
-```mermaid
-stateDiagram-v2
-    [*] --> New: lead imported
-    New --> TemplateSent: consent ✓ · form mapped
-    TemplateSent --> Asking: customer replies
-    TemplateSent --> Closed: "Not now"
-    Asking --> Asking: answer saved · next question
-    Asking --> Completed: last question answered
-    Asking --> Handoff: "call me" / 2 unclear replies
-    Asking --> HumanMode: agent takes over
-    Completed --> HumanMode: agent takes over
-    Handoff --> HumanMode: agent takes over
-    HumanMode --> Asking: return to assistant
-    TemplateSent --> OptedOut: STOP
-    Asking --> OptedOut: STOP
-    OptedOut --> [*]
-```
-
-### Data model
-
-```mermaid
-erDiagram
-    PROPERTY ||--o{ LEAD_FORM : "advertised by"
-    QUESTION_FLOW ||--o{ LEAD_FORM : "used by"
-    LEAD_FORM ||--o{ LEAD : "source of"
-    LEAD ||--|| CONVERSATION : has
-    CONVERSATION ||--o{ MESSAGE : contains
-    LEAD ||--o{ LEAD_REQUIREMENT : captures
-    LEAD ||--o{ CONSENT_RECORD : "consent history"
-    LEAD ||--o{ FOLLOW_UP : schedules
-    LEAD ||--o{ INTERNAL_NOTE : "staff notes"
-    USER ||--o{ LEAD : owns
-    USER ||--o{ AUDIT_EVENT : performs
-    IMPORT_BATCH ||--o{ LEAD : imported
-
-    LEAD {
-        uuid id PK
-        string dedupe_key UK
-        string phone_e164
-        string status
-        string priority
-        string consent_status
-    }
-    CONVERSATION {
-        uuid id PK
-        string mode "bot | human"
-        string state
-        int version "optimistic lock"
-        datetime window_expires_at
-    }
-    MESSAGE {
-        uuid id PK
-        string provider_message_id UK
-        string idempotency_key UK
-        string direction
-        string status
-    }
-```
-
----
-
-## Design principles
-
-| Principle | How it is enforced |
-|---|---|
-| **Consent is a gate, not a flag** | No consent record → zero messages. Checked again by the dispatcher right before sending. |
-| **Human always wins** | Takeover is an atomic, versioned update; queued bot messages are cancelled; the bot never answers in human mode. |
-| **Everything is idempotent** | Unique keys on lead IDs, provider message IDs and outbound jobs — re-imports, webhook retries and double clicks never duplicate anything. |
-| **Facts come from records** | The property card is built from verified property fields; nothing is generated. |
-| **Every change is attributable** | Append-only audit log, protected by a database trigger. |
-| **Official channels only** | WhatsApp Business Cloud API and Google Sheets API — no unofficial automation. |
 
 ---
 
