@@ -41,28 +41,28 @@ export default function LeadDetail() {
   const stageIdx = STAGES.indexOf(l.status);
 
   return (
-    <div className="mx-auto max-w-[1440px] p-6">
+    <div className="mx-auto max-w-[1440px] p-4 sm:p-6">
 
-      <div className="card mb-4 p-5">
+      <div className="card mb-4 p-4 sm:p-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="flex min-w-0 items-center gap-4">
+          <div className="flex min-w-0 items-center gap-3 sm:gap-4">
             <Avatar name={l.full_name} size="lg" />
             <div className="min-w-0">
               <h1 className="truncate text-xl font-semibold tracking-tight text-ink">{l.full_name}</h1>
               <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-ink-3">
                 <span className="tabular">{phone || l.phone_masked}</span>
                 {!phone && <button onClick={reveal} className="inline-flex items-center gap-1 text-xs font-semibold text-brand-700 hover:underline" title="Revealing is recorded in the audit log"><Eye className="h-3.5 w-3.5" /> Reveal</button>}
-                {l.email && <span>{l.email}</span>}
+                {l.email && <span className="break-all">{l.email}</span>}
                 {l.property && <span>· {l.property.name}</span>}
               </div>
               <div className="mt-2 flex flex-wrap gap-1.5"><StatusChip status={l.status} /><PriorityChip priority={l.priority} /><ConsentChip status={l.consent_status} /><ModeChip mode={l.mode} /></div>
             </div>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap">
             {notStarted && <Button variant="secondary" onClick={() => start.mutate()} loading={start.isPending}><Send className="h-4 w-4" /> Start WhatsApp</Button>}
             {conv && !notStarted && <Button variant="secondary" onClick={() => nav(`/conversations/${conv.id}`)}><MessageSquare className="h-4 w-4" /> Open chat</Button>}
             <Button variant="secondary" onClick={() => setFuOpen(true)}><CalendarPlus className="h-4 w-4" /> Follow-up</Button>
-            <Button onClick={() => setStatusOpen(true)} disabled={l.allowed_statuses.length === 0}>Change status</Button>
+            <Button className="col-span-2 sm:col-span-1" onClick={() => setStatusOpen(true)} disabled={l.allowed_statuses.length === 0}>Change status</Button>
           </div>
         </div>
         {/* Stage tracker */}
@@ -72,13 +72,14 @@ export default function LeadDetail() {
             return (
               <li key={s}>
                 <div className={clsx("h-1.5 rounded-full", reached ? (l.status === "won" ? "bg-green-600" : "bg-brand-600") : "bg-slate-100")} />
-                <div className={clsx("mt-1.5 flex items-center gap-1 text-2xs font-medium", reached ? "text-ink" : "text-ink-4")}>
+                <div className={clsx("mt-1.5 hidden items-center gap-1 text-2xs font-medium sm:flex", reached ? "text-ink" : "text-ink-4")}>
                   {reached && i < stageIdx && <Check className="h-3 w-3 text-brand-700" />}{STATUS_LABEL[s]}
                 </div>
               </li>
             );
           })}
         </ol>
+        <div className="mt-2 text-xs text-ink-3 sm:hidden">Stage: <b className="text-ink">{STATUS_LABEL[l.status] || l.status}</b>{stageIdx >= 0 && ` (${stageIdx + 1} of ${STAGES.length})`}</div>
         {["lost", "nurture"].includes(l.status) && <div className="mt-2 text-xs text-ink-3">Currently <b>{STATUS_LABEL[l.status]}</b>{l.status_reason && ` — ${l.status_reason}`}</div>}
       </div>
 
@@ -86,12 +87,12 @@ export default function LeadDetail() {
         <div className="mb-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
           <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
           <div><b>Automatic WhatsApp is on hold:</b> {l.review_reasons.join(" · ")}
-            {l.review_reasons.some((r: string) => r.includes("not mapped")) && <> — <Link to="/forms" className="font-semibold underline">map the form</Link></>}</div>
+            {l.review_reasons.some((r: string) => r.includes("map the form")) && <> — <Link to="/forms" className="font-semibold underline">open Forms & Flows</Link></>}</div>
         </div>
       )}
 
       <div className="grid gap-4 xl:grid-cols-[300px_minmax(0,1fr)_320px]">
-        <div className="space-y-4">
+        <div className="min-w-0 space-y-4">
           <Card title="Source">
             <dl className="space-y-2 text-sm">
               {[["Meta lead ID", l.external_lead_id], ["Form", l.external_form_id], ["Campaign", l.campaign_name], ["Ad", l.ad_name], ["Platform", l.platform],
@@ -100,10 +101,17 @@ export default function LeadDetail() {
                 <div key={k as string} className="flex justify-between gap-3"><dt className="shrink-0 text-ink-3">{k}</dt><dd className="truncate text-right font-medium">{v || "—"}</dd></div>
               ))}
             </dl>
-            {(l.interest || l.budget_text || l.timeline_text) && (
+            {l.form_answers?.length > 0 && (
               <div className="mt-3 rounded-lg bg-slate-50 p-3 text-xs">
-                <div className="mb-1 font-semibold text-ink-2">Said in the form</div>
-                {[l.interest, l.budget_text, l.timeline_text].filter(Boolean).map((t: string) => <div key={t} className="text-ink-3">“{t}”</div>)}
+                <div className="mb-2 font-semibold text-ink-2">From the lead form</div>
+                <dl className="space-y-1.5">
+                  {l.form_answers.map((a: { label: string; value: string }) => (
+                    <div key={a.label} className="flex justify-between gap-3">
+                      <dt className="shrink-0 text-ink-3">{a.label}</dt>
+                      <dd className="text-right font-medium text-ink-2">{a.value}</dd>
+                    </div>
+                  ))}
+                </dl>
               </div>
             )}
             {isManager(user) && (
@@ -126,25 +134,25 @@ export default function LeadDetail() {
           </Card>
         </div>
 
-        <div className="space-y-4">
+        <div className="min-w-0 space-y-4">
           <Card title="Requirements" subtitle="Captured on WhatsApp — agents can correct any value" bodyClass="p-0">
             {l.questions.length === 0 ? <div className="p-4 text-sm text-ink-3">No question flow for this lead. Map its form in Forms & flows.</div> : (
               <table className="w-full">
-                <thead><tr className="border-b border-line"><th className="th">Question</th><th className="th">Answer</th><th className="th">Customer said</th><th className="th">Source</th></tr></thead>
+                <thead><tr className="border-b border-line"><th className="th">Question</th><th className="th">Answer</th><th className="th hidden sm:table-cell">Customer said</th><th className="th hidden sm:table-cell">Source</th></tr></thead>
                 <tbody>{l.questions.map((qq: any) => {
                   const r: any = answered.get(qq.key);
                   return (
                     <tr key={qq.key} className="border-b border-line/60 last:border-0">
                       <td className="td font-medium">{qq.label}</td>
                       <td className="td">
-                        <select aria-label={qq.label} className="input h-8 text-xs" value={qq.options.find((o: any) => o.title === r?.display)?.id || ""}
+                        <select aria-label={qq.label} className="input sm:h-8 sm:text-xs" value={qq.options.find((o: any) => o.title === r?.display)?.id || ""}
                           onChange={(e) => e.target.value && editReq.mutate({ field_key: qq.key, option_id: e.target.value })}>
                           <option value="">Not captured</option>
                           {qq.options.map((o: any) => <option key={o.id} value={o.id}>{o.title}</option>)}
                         </select>
                       </td>
-                      <td className="td text-xs text-ink-3">{r ? `“${r.original_text}”` : "—"}</td>
-                      <td className="td text-xs">{r ? (r.source === "agent" ? "Agent" : "WhatsApp") : "—"}</td>
+                      <td className="td hidden text-xs text-ink-3 sm:table-cell">{r ? `“${r.original_text}”` : "—"}</td>
+                      <td className="td hidden text-xs sm:table-cell">{r ? (r.source === "agent" ? "Agent" : "WhatsApp") : "—"}</td>
                     </tr>
                   );
                 })}</tbody>
@@ -169,7 +177,7 @@ export default function LeadDetail() {
           </Card>
         </div>
 
-        <div className="space-y-4">
+        <div className="min-w-0 space-y-4">
           <Card title="Follow-ups" action={<Button size="sm" variant="ghost" onClick={() => setFuOpen(true)}><CalendarPlus className="h-3.5 w-3.5" /> Add</Button>}>
             {l.follow_ups.length === 0 ? <div className="text-sm text-ink-4">None scheduled.</div> : (
               <ul className="space-y-2">{l.follow_ups.map((f: any) => {
@@ -177,7 +185,7 @@ export default function LeadDetail() {
                 return (
                   <li key={f.id} className="flex items-start gap-2.5 rounded-lg border border-line p-2.5">
                     <button aria-label={f.status === "done" ? "Completed" : "Mark done"} disabled={f.status === "done"} onClick={() => done.mutate(f.id)}
-                      className={clsx("mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors", f.status === "done" ? "border-brand-700 bg-brand-700 text-white" : "border-line-strong hover:border-brand-600")}>
+                      className={clsx("mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border transition-colors sm:h-4 sm:w-4", f.status === "done" ? "border-brand-700 bg-brand-700 text-white" : "border-line-strong hover:border-brand-600")}>
                       {f.status === "done" && <Check className="h-3 w-3" />}
                     </button>
                     <div className="min-w-0 flex-1 text-sm">

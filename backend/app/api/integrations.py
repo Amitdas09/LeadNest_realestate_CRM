@@ -1,5 +1,6 @@
 """Settings → integrations status, WhatsApp test send, and the WhatsApp webhook."""
 
+import hmac
 import json
 import logging
 
@@ -14,7 +15,7 @@ from app.core.config import get_settings
 from app.core.db import SessionLocal, get_db
 from app.core.errors import ApiError
 from app.models import AppState, Role, Suppression, User
-from app.services import audit, sheets, webhooks, whatsapp
+from app.services import audit, sheets, signals, webhooks, whatsapp
 from app.services.phones import mask_phone, normalize_phone
 
 router = APIRouter(tags=["integrations"])
@@ -67,6 +68,21 @@ def test_send(body: TestSend, db: Session = Depends(get_db), user: User = Depend
                  details={"to": mask_phone(phone), "template": "hello_world", "phone_number_id": s.whatsapp_phone_number_id})
     db.commit()
     return {"ok": True, "provider_message_id": mid}
+
+
+# ------------------------------------------------------------------ instant sheet trigger
+
+@router.post("/webhooks/sheet", include_in_schema=False)
+def sheet_changed(request: Request):
+    """Called by the lead sheet (Apps Script) when a row is added or completed: check it now."""
+    token = get_settings().sheet_trigger_token
+    given = request.headers.get("X-LeadNest-Token") or request.query_params.get("token") or ""
+    if not token:
+        raise ApiError(404, "not_found", "Not found.")
+    if not hmac.compare_digest(given.encode(), token.encode()):
+        raise ApiError(403, "forbidden", "Invalid token.")
+    signals.kick_sync()
+    return {"ok": True}
 
 
 # ------------------------------------------------------------------ webhook (called by Meta)

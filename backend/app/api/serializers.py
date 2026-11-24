@@ -3,7 +3,7 @@
 from typing import Any
 
 from app.models import Conversation, Lead, Message, User
-from app.services.conversations import window_open
+from app.services.conversations import missing_details, window_open
 from app.services.phones import mask_phone
 
 
@@ -30,12 +30,14 @@ def lead_mode(lead: Lead) -> str:
 
 def needs_review(lead: Lead) -> list[str]:
     reasons = []
+    missing = missing_details(lead)
+    if missing and (not lead.conversation or lead.conversation.state == "new"):
+        reasons.append("Lead form incomplete: missing " + ", ".join(missing))
     if lead.consent_status == "unknown":
         reasons.append("No WhatsApp consent recorded")
-    if lead.form is None and lead.source == "sheet":
-        reasons.append("No form ID on the row")
-    elif lead.form is not None and not lead.form.is_mapped:
-        reasons.append("Form not mapped to a property/flow")
+    conv = lead.conversation
+    if lead.source == "sheet" and conv is not None and conv.state == "new" and conv.flow_id is None:
+        reasons.append("No question flow: choose \"Looking For\" in the sheet, or map the form")
     if lead.conversation and lead.conversation.state == "handoff" and lead.conversation.mode != "human":
         reasons.append("Customer is waiting for a person")
     return reasons

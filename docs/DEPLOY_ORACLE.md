@@ -120,7 +120,19 @@ cd ~/leadnest
 docker compose -f deploy/docker-compose.prod.yml --env-file .env.production up -d --build
 ```
 
-The first build takes a few minutes. Then create your admin account and the demo setup:
+The first build takes a few minutes.
+
+> **Small server (E2.1.Micro, 1 GB)?** Building on the server can run out of memory. Build on your
+> PC instead (Docker Desktop running, same `leadflow-crm` folder) and ship the image:
+>
+> ```powershell
+> powershell -ExecutionPolicy Bypass -File deploy\ship-image.ps1 -Server <PUBLIC_IP> -Key C:\path\to\ssh-key.key
+> ```
+>
+> Then on the server start it **without** `--build`:
+> `docker compose -f deploy/docker-compose.prod.yml --env-file .env.production up -d`
+
+Then create your admin account and the demo setup:
 
 ```bash
 alias lnc='docker compose -f deploy/docker-compose.prod.yml --env-file .env.production'

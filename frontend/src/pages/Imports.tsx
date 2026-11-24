@@ -2,7 +2,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
 import { RefreshCw, Sheet } from "lucide-react";
 import { useState } from "react";
-import { Button, Card, Chip, Empty, ErrorBox, Loading, PageHeader, useToast } from "../components/ui";
+import { Link } from "react-router-dom";
+import { Button, Card, Chip, Empty, ErrorBox, Loading, PageHeader, Tabs, useToast } from "../components/ui";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { dateTime, timeAgo } from "../lib/format";
@@ -14,10 +15,96 @@ const STATUS: Record<string, string> = {
   running: "bg-blue-50 text-blue-700 ring-blue-200",
 };
 
+const OUTCOME: Record<string, [string, string]> = {
+  messaged: ["Messaged", "bg-emerald-50 text-emerald-700"],
+  failed: ["Failed", "bg-red-50 text-red-700"],
+  not_messaged: ["Not messaged", "bg-amber-50 text-amber-800"],
+  waiting: ["Waiting", "bg-sky-50 text-sky-700"],
+  not_imported: ["Not imported", "bg-red-50 text-red-700"],
+  duplicate: ["Duplicate", "bg-slate-100 text-slate-600"],
+};
+
+/** Every sheet row, matched to the CRM: messaged or not, delivery status, and why not. */
+function SheetRows() {
+  const [filter, setFilter] = useState<string>("");
+  const r = useQuery({ queryKey: ["sheet-report"], queryFn: () => api("/api/v1/imports/sheet-report"), refetchInterval: 15000 });
+  if (r.isLoading) return <Loading rows={6} />;
+  if (r.error) return <ErrorBox error={r.error} />;
+  const d = r.data;
+  const items = d.items.filter((i: any) => !filter || i.outcome === filter);
+  const chips: [string, string, number][] = [["", "All rows", d.total], ...Object.entries(OUTCOME)
+    .map(([k, [label]]) => [k, label, d.summary[k]] as [string, string, number]).filter(([, , n]) => n > 0)];
+  return (
+    <div className="space-y-3">
+      {d.error && <ErrorBox error={{ message: `Could not read the sheet: ${d.error}` }} />}
+      <div className="no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4 sm:mx-0 sm:flex-wrap sm:px-0">
+        {chips.map(([k, label, n]) => (
+          <button key={k} onClick={() => setFilter(k)} aria-pressed={filter === k}
+            className={clsx("inline-flex h-9 shrink-0 items-center gap-2 rounded-full border px-3.5 text-sm font-medium transition-colors",
+              filter === k ? "border-brand-700 bg-brand-700 text-white" : "border-line bg-white text-ink-2 hover:bg-slate-50")}>
+            {label}<span className={clsx("rounded-full px-1.5 text-xs font-semibold", filter === k ? "bg-white/20" : "bg-slate-100 text-ink-3")}>{n}</span>
+          </button>
+        ))}
+      </div>
+      <div className="card overflow-hidden">
+        {items.length === 0 ? <Empty title={d.total ? "No rows with this result" : "The sheet has no lead rows yet"} /> : (<>
+          {/* Phone: one card per row */}
+          <ul className="divide-y divide-line/60 md:hidden">
+            {items.map((i: any) => <RowCard key={i.row} i={i} />)}
+          </ul>
+          <table className="hidden w-full md:table">
+            <thead><tr className="border-b border-line">{["Row", "Lead", "Property / looking for", "Result", "Why / what happened", "First message", ""].map((h) => <th key={h} className="th">{h}</th>)}</tr></thead>
+            <tbody>{items.map((i: any) => (
+              <tr key={i.row} className="border-b border-line/60 align-top last:border-0">
+                <td className="td text-xs text-ink-3">#{i.row}</td>
+                <td className="td"><div className="font-semibold text-ink">{i.name || "—"}</div><div className="text-xs text-ink-3">{i.phone}</div></td>
+                <td className="td"><div>{i.property || "—"}</div><div className="text-xs text-ink-3">{i.looking_for || ""}</div></td>
+                <td className="td"><Chip className={OUTCOME[i.outcome][1]}>{OUTCOME[i.outcome][0]}</Chip></td>
+                <td className="td max-w-[360px] text-xs text-ink-2">{i.reason}</td>
+                <td className="td whitespace-nowrap text-xs text-ink-3">{i.message_status ? <><b className="text-ink-2">{i.message_status}</b><div>{dateTime(i.message_at)}</div></> : "—"}</td>
+                <td className="td whitespace-nowrap text-right">
+                  {i.conversation_id && i.message_status && <Link to={`/conversations/${i.conversation_id}`} className="mr-3 text-xs font-semibold text-brand-700 hover:underline">Chat</Link>}
+                  {i.lead_id && <Link to={`/leads/${i.lead_id}`} className="text-xs font-semibold text-brand-700 hover:underline">Lead</Link>}
+                </td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </>)}
+      </div>
+      <p className="text-xs text-ink-3">Updated every 15 seconds{d.tab ? ` from the “${d.tab}” tab` : ""}. Newest rows first.</p>
+    </div>
+  );
+}
+
+function RowCard({ i }: { i: any }) {
+  return (
+    <li className="px-4 py-3">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="truncate font-semibold text-ink">{i.name || "—"} <span className="text-xs font-normal text-ink-4">· row {i.row}</span></div>
+          <div className="truncate text-xs text-ink-3">{i.phone}{i.property ? ` · ${i.property}` : ""}{i.looking_for ? ` · ${i.looking_for}` : ""}</div>
+        </div>
+        <Chip className={clsx("shrink-0", OUTCOME[i.outcome][1])}>{OUTCOME[i.outcome][0]}</Chip>
+      </div>
+      <div className="mt-1.5 text-sm text-ink-2">{i.reason}</div>
+      {(i.message_status || i.lead_id) && (
+        <div className="mt-2 flex items-center gap-4 text-xs">
+          {i.message_status && <span className="text-ink-3">First message: <b className="text-ink-2">{i.message_status}</b> · {timeAgo(i.message_at)}</span>}
+          <span className="ml-auto flex gap-4">
+            {i.conversation_id && i.message_status && <Link to={`/conversations/${i.conversation_id}`} className="font-semibold text-brand-700">Chat</Link>}
+            {i.lead_id && <Link to={`/leads/${i.lead_id}`} className="font-semibold text-brand-700">Lead</Link>}
+          </span>
+        </div>
+      )}
+    </li>
+  );
+}
+
 export default function Imports() {
   const qc = useQueryClient();
   const toast = useToast();
   const { user } = useAuth();
+  const [view, setView] = useState<"rows" | "history">("rows");
   const [batch, setBatch] = useState<number | null>(null);
   const q = useQuery({ queryKey: ["imports"], queryFn: () => api("/api/v1/imports"), refetchInterval: 10000 });
   const errors = useQuery({ queryKey: ["import-errors", batch], queryFn: () => api(`/api/v1/imports/${batch}/errors`), enabled: batch !== null });
@@ -35,9 +122,13 @@ export default function Imports() {
   const last = s.last_sync;
 
   return (
-    <div className="mx-auto max-w-[1440px] p-6">
-      <PageHeader title="Import monitor" subtitle={`Your Google Sheet is checked every ${s.poll_seconds} seconds. Re-reading is always safe — no duplicate leads or messages.`} />
+    <div className="mx-auto max-w-[1440px] p-4 sm:p-6">
+      <PageHeader title="Sheet & imports" subtitle="Every enquiry in your Google Sheet: was it messaged on WhatsApp, and if not, why." />
       <ErrorBox error={q.error} />
+      <Tabs value={view} onChange={setView} className="mb-4"
+        items={[{ value: "rows", label: "Sheet rows" }, { value: "history", label: "Import history" }]} />
+      {view === "rows" && <SheetRows />}
+      {view === "history" && <>
       <div className="mb-4 grid gap-3 lg:grid-cols-[1.4fr_repeat(4,1fr)]">
         <div className="card flex items-center gap-3 px-4 py-3">
           <Sheet className="h-8 w-8 shrink-0 text-emerald-600" />
@@ -54,7 +145,7 @@ export default function Imports() {
         ))}
       </div>
 
-      <Card title="Import batches" bodyClass="p-0" className="mb-4">
+      <Card title="Import batches" bodyClass="overflow-x-auto p-0" className="mb-4">
         {q.data.batches.length === 0 ? <Empty title="No imports yet" hint="An import batch is recorded each time new rows are found (or when you press Sync now)." /> : (
           <table className="w-full">
             <thead><tr className="border-b border-slate-100">{["Batch", "Started", "By", "Rows", "Imported", "Dupes", "Errors", "Status", ""].map((h) => <th key={h} className="th">{h}</th>)}</tr></thead>
@@ -71,7 +162,7 @@ export default function Imports() {
       </Card>
 
       {batch !== null && (
-        <Card title={`Row errors · batch #${batch}`} action={<span className="text-[11px] text-slate-500">valid rows are never blocked by invalid rows</span>} bodyClass="p-0">
+        <Card title={`Row errors · batch #${batch}`} action={<span className="hidden text-[11px] text-slate-500 sm:inline">valid rows are never blocked by invalid rows</span>} bodyClass="overflow-x-auto p-0">
           {errors.isLoading ? <Loading /> : errors.data.items.length === 0 ? <Empty title="No row errors in this batch" /> : (
             <table className="w-full"><thead><tr className="border-b border-slate-100">{["Row", "Field", "Problem", "Suggested action"].map((h) => <th key={h} className="th">{h}</th>)}</tr></thead>
               <tbody>{errors.data.items.map((e: any, i: number) => (
@@ -81,6 +172,7 @@ export default function Imports() {
           )}
         </Card>
       )}
+      </>}
     </div>
   );
 }

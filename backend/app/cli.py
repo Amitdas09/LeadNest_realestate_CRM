@@ -146,7 +146,25 @@ def demo_sheet(phone: str) -> int:
     if not (clear.ok and write.ok):
         print(f"Write failed: HTTP {write.status_code} {write.text[:200]}", file=sys.stderr)
         return 1
-    print(f"Sheet tab '{tab}' now has {len(rows)} demo rows. Your number is on row 2 (Demo Customer).")
+    from app.services.sheet_layout import apply_layout
+
+    apply_layout(drop_extra=True)
+    print(f"Sheet now has {len(rows)} demo rows in the standard layout. Your number is on row 2 (Demo Customer).")
+    return 0
+
+
+def sheet_layout(drop_extra: bool) -> int:
+    from app.services.sheet_layout import apply_layout
+
+    try:
+        res = apply_layout(drop_extra=drop_extra)
+    except Exception as exc:  # noqa: BLE001 - report any Google error plainly
+        print(f"Could not update the sheet: {exc}", file=sys.stderr)
+        return 1
+    print(f"Lead sheet restyled: {res['rows']} lead rows kept, columns: {', '.join(res['columns'])}.")
+    if res["extra_columns_kept"]:
+        print("Extra columns kept at the end: " + ", ".join(res["extra_columns_kept"]))
+    print("Added the 'How it works' tab.")
     return 0
 
 
@@ -182,6 +200,9 @@ def main() -> int:
     p.add_argument("--phone", required=True)
     p = sub.add_parser("whatsapp-webhook", help="Register the webhook URL with Meta")
     p.add_argument("--url", required=True, help="Public HTTPS base URL (e.g. the cloudflared tunnel)")
+    p = sub.add_parser("sheet-layout", help="Give the lead sheet the standard clean layout (keeps every lead)")
+    p.add_argument("--drop-extra", action="store_true",
+                   help="Remove columns LeadNest does not use (e.g. old budget/timeline questions)")
     args = parser.parse_args()
     if args.command == "create-admin":
         return create_admin(args.email, args.name)
@@ -196,6 +217,8 @@ def main() -> int:
         return demo_sheet(args.phone)
     if args.command == "whatsapp-webhook":
         return whatsapp_webhook(args.url)
+    if args.command == "sheet-layout":
+        return sheet_layout(args.drop_extra)
     return 1
 
 

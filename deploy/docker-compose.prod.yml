@@ -21,6 +21,7 @@ services:
       retries: 20
 
   app:
+    image: leadnest-app:latest          # built on the server (--build) or shipped from a PC (deploy/ship-image.ps1)
     build:
       context: ..
       dockerfile: Dockerfile

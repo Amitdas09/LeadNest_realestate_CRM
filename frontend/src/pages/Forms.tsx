@@ -12,7 +12,7 @@ import { END, HANDOFF } from "../lib/flow";
 export default function Forms() {
   const [tab, setTab] = useState<"flows" | "forms">("flows");
   return (
-    <div className="mx-auto max-w-[1600px] p-6">
+    <div className="mx-auto max-w-[1600px] p-4 sm:p-6">
       <PageHeader title="Forms & question flows"
         subtitle="Each Meta form → a property → a WhatsApp question flow. Every button decides what happens next."
         actions={<Tabs value={tab} onChange={setTab} items={[{ value: "flows", label: "Question flows" }, { value: "forms", label: "Meta forms" }]} />} />

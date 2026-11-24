@@ -60,11 +60,32 @@ def _inr(v: int) -> str:
     return f"₹{v / 10_000_000:.2f}".rstrip("0").rstrip(".") + " Cr" if v >= 10_000_000 else f"₹{v / 100_000:.0f} Lakh"
 
 
+def sheet_value(lead: Lead, canon: str) -> str:
+    """A value from the lead's own form row (e.g. canon="form_name" -> the Property column)."""
+    from app.services.importer import FIELD_ALIASES, norm_header  # local import: importer imports us
+
+    by_norm = {norm_header(k): str(v).strip() for k, v in (lead.raw or {}).items() if not str(k).startswith("__")}
+    return next((by_norm[a] for a in FIELD_ALIASES.get(canon, []) if by_norm.get(a)), "")
+
+
+def property_name(lead: Lead) -> str:
+    """The property the customer enquired about, as their lead form says it."""
+    return sheet_value(lead, "form_name") or (lead.prop.name if lead.prop else "") or get_settings().business_name
+
+
+def enquiry_card(lead: Lead) -> str:
+    """What the customer asked for in the lead form, one line per answer."""
+    rows = (("🏠", lead.interest or sheet_value(lead, "interest")), ("💰", lead.budget_text or sheet_value(lead, "budget")),
+            ("📍", sheet_value(lead, "preferred_location")), ("📝", sheet_value(lead, "details")))
+    return "\n".join(f"{icon} {value}" for icon, value in rows if value)
+
+
 def property_details(lead: Lead) -> str:
-    """Short property card from the verified property record (never invented)."""
+    """Card for the property: the verified CRM record when the form names a known property,
+    otherwise exactly what the customer wrote in the lead form (never invented)."""
     p = lead.prop
     if p is None:
-        return ""
+        return enquiry_card(lead)
     lines = []
     if p.location:
         lines.append(f"📍 {p.location}")
@@ -80,7 +101,7 @@ def property_details(lead: Lead) -> str:
 def _fmt(template: str, lead: Lead) -> str:
     return (
         template.replace("{name}", _first_name(lead))
-        .replace("{property}", lead.prop.name if lead.prop else "our projects")
+        .replace("{property}", property_name(lead))
         .replace("{property_details}", property_details(lead))
         .replace("{brochure}", f"\n📄 Brochure: {lead.prop.brochure_url}" if lead.prop and lead.prop.brochure_url else "")
         .replace("{business}", get_settings().business_name)
@@ -149,23 +170,91 @@ def send_bot_text(db: Session, conv: Conversation, lead: Lead, text: str, extra:
 # ---------------------------------------------------------------- start
 
 
+# Lead-form details a sheet lead must have before the automatic first message goes out.
+SHEET_REQUIRED_DETAILS: tuple[tuple[str, str], ...] = (("full_name", "name"), ("email", "email"), ("city", "city"))
+
+
+def form_summary(lead: Lead) -> str:
+    """'3 BHK · 80 lakh - 1 crore · Patia' from the lead form, for the first message."""
+    from app.services.importer import form_answers  # local import: the importer imports this module
+
+    keep = ("Looking for", "Budget", "Preferred location")
+    return " · ".join(a["value"] for a in form_answers(lead.raw or {}) if a["label"] in keep)
+
+
+def opening_text(lead: Lead) -> str:
+    """First message when the 24-hour window is already open (no template needed)."""
+    text = f"Hi {_first_name(lead)} 👋 Thanks for your enquiry about *{property_name(lead)}*."
+    mine = enquiry_card(lead)
+    if mine:
+        text += f"\n\n*Your enquiry*\n{mine}"
+    if lead.prop is not None:  # the form names a property we have verified details for
+        card = property_details(lead)
+        if card:
+            text += f"\n\n*About {lead.prop.name}*\n{card}"
+    return text + "\n\n"
+
+
+def phone_window(db: Session, lead: Lead) -> datetime | None:
+    """WhatsApp's 24-hour window belongs to the phone number, whichever enquiry it came from."""
+    return db.scalar(select(func.max(Conversation.window_expires_at))
+                     .join(Lead, Lead.id == Conversation.lead_id).where(Lead.phone_e164 == lead.phone_e164))
+
+
+def supersede_older(db: Session, lead: Lead) -> int:
+    """A newer enquiry from the same number wins: close the older enquiries' bot chats."""
+    older = db.scalars(
+        select(Conversation).join(Lead, Lead.id == Conversation.lead_id)
+        .where(Lead.phone_e164 == lead.phone_e164, Lead.id != lead.id, Conversation.mode == "bot",
+               Conversation.state.in_(("new", "template_sent", "asking")))
+    ).all()
+    for c in older:
+        c.state = "closed"
+        audit.record(db, action="conversation.superseded", entity_type="lead", entity_id=c.lead_id, system=True,
+                     details={"newer_lead": str(lead.id)})
+    return len(older)
+
+
+def missing_details(lead: Lead) -> list[str]:
+    """Lead-form fields still empty on a sheet lead (consent is checked separately)."""
+    if lead.source != "sheet":
+        return []
+    return [label for attr, label in SHEET_REQUIRED_DETAILS if not (getattr(lead, attr) or "").strip()]
+
+
 def start_conversation(db: Session, lead: Lead, actor: User | None = None) -> tuple[bool, str]:
-    """Queue the approved opening template. Returns (queued, reason)."""
+    """Queue the approved opening template. Returns (queued, reason).
+
+    Automatic starts (actor is None) wait until the lead form is complete; an agent
+    can still start a conversation by hand.
+    """
     conv = ensure_conversation(db, lead)
     if lead.consent_status != "opted_in":
         return False, "no_consent"
+    if actor is None and missing_details(lead):
+        return False, "incomplete"
     if is_suppressed(db, lead.phone_e164):
         return False, "opted_out"
     if conv.state not in ("new",):
         return False, "already_started"
-    if lead.form is not None and not lead.form.is_mapped:
-        return False, "form_unmapped"
     if conv.flow_id is None:
+        # Neither "Looking For" nor the form mapping tells us which questions to ask.
         return False, "no_question_flow"
+    window = phone_window(db, lead)
+    if window is not None and window > now():
+        # The customer wrote to us in the last 24 h (e.g. a new enquiry from the same number):
+        # skip the template and open with the enquiry details and the first question.
+        conv.window_expires_at = window
+        conv.state, conv.question_index, conv.attempts = "asking", 0, 0
+        ask_current(db, conv, lead, prefix=opening_text(lead), extra={"opening": True},
+                    idempotency_key=f"opening:{lead.id}")
+        audit.record(db, action="conversation.started", entity_type="lead", entity_id=lead.id,
+                     actor=actor, system=actor is None, details={"direct": True})
+        return True, "queued"
     s = get_settings()
     params = []
     if s.whatsapp_opening_template != "hello_world":
-        params = [_first_name(lead), lead.prop.name if lead.prop else s.business_name]
+        params = [_first_name(lead), property_name(lead)]
     m = enqueue(
         db, conv, lead,
         sender_type="template", kind="template",
@@ -191,7 +280,8 @@ def _questions(conv: Conversation) -> list[dict[str, Any]]:
     return list(conv.flow.questions) if conv.flow else []
 
 
-def ask_current(db: Session, conv: Conversation, lead: Lead, prefix: str = "") -> None:
+def ask_current(db: Session, conv: Conversation, lead: Lead, prefix: str = "",
+                extra: dict[str, Any] | None = None, idempotency_key: str | None = None) -> None:
     qs = _questions(conv)
     if conv.question_index >= len(qs):
         return
@@ -203,7 +293,8 @@ def ask_current(db: Session, conv: Conversation, lead: Lead, prefix: str = "") -
         kind="buttons" if len(q["options"]) <= whatsapp.MAX_BUTTONS else "list",
         body=body,
         request=whatsapp.question_payload(lead.phone_e164, body, q["options"]),
-        extra={"question_key": q["key"], "options": [o["title"] for o in q["options"]]},
+        idempotency_key=idempotency_key,
+        extra={"question_key": q["key"], "options": [o["title"] for o in q["options"]], **(extra or {})},
     )
 
 
@@ -322,18 +413,24 @@ def handoff(db: Session, conv: Conversation, lead: Lead, reason: str, ack: str |
                  details={"reason": reason})
 
 
+STOP_CONFIRMATION = ("Okay, we've stopped this chat. You won't get more messages about this enquiry. "
+                     "If you enquire again later, we'll be happy to help.")
+
+
 def opt_out(db: Session, conv: Conversation, lead: Lead, via: str, actor: User | None = None) -> None:
+    """The customer asked to stop: end THIS enquiry's chat.
+
+    Only this enquiry is stopped. The number itself is not blocked, so a new lead-form
+    submission (which carries fresh WhatsApp consent) starts a new chat.
+    """
     lead.consent_status = "opted_out"
     db.add(ConsentRecord(lead_id=lead.id, status="opted_out", source=via,
-                         evidence=f"Customer sent a stop request via {via}", changed_by=actor.id if actor else None))
-    db.execute(pg_insert(Suppression).values(phone_hash=phone_hash(lead.phone_e164), reason=via)
-               .on_conflict_do_nothing(index_elements=["phone_hash"]))
+                         evidence=f"Customer asked to stop this chat via {via}", changed_by=actor.id if actor else None))
     conv.state = "opted_out"
-    # Anything still waiting to go out is cancelled.
+    # Anything still waiting to go out for this chat is cancelled.
     db.execute(update(Message).where(Message.conversation_id == conv.id, Message.status == "queued")
-               .values(status="blocked", error_code="opted_out", error_message="Customer opted out"))
-    send_bot_text(db, conv, lead, "You have been unsubscribed and will not receive further messages from us.",
-                  extra={"opt_out_confirmation": True})
+               .values(status="blocked", error_code="opted_out", error_message="Customer stopped this chat"))
+    send_bot_text(db, conv, lead, STOP_CONFIRMATION, extra={"opt_out_confirmation": True})
     audit.record(db, action="consent.opt_out", entity_type="lead", entity_id=lead.id,
                  actor=actor, system=actor is None, details={"via": via})
 
@@ -365,7 +462,10 @@ def handle_inbound(db: Session, conv: Conversation, lead: Lead, text: str, reply
         conv.state = "asking"
         conv.question_index = 0
         conv.attempts = 0
-        intro = _fmt(conv.flow.intro_message, lead) + "\n\n" if conv.flow.intro_message else ""
+        intro = _fmt(conv.flow.intro_message, lead).rstrip() + "\n\n" if conv.flow.intro_message else ""
+        summary = form_summary(lead)
+        if summary and lead.prop is not None:  # without a CRM card the intro already shows the form answers
+            intro += f"You mentioned: {summary}\n\n"
         ask_current(db, conv, lead, prefix=intro)
         return
 
@@ -526,7 +626,7 @@ def agent_send_template(db: Session, conv: Conversation, lead: Lead, user: User,
         raise ApiError(409, "opted_out", "This customer opted out. Messages cannot be sent.")
     if lead.consent_status != "opted_in":
         raise ApiError(409, "no_consent", "No WhatsApp consent is recorded, so a template cannot be sent.")
-    params = [_first_name(lead), lead.prop.name if lead.prop else get_settings().business_name][: template["params"]]
+    params = [_first_name(lead), property_name(lead)][: template["params"]]
     body = whatsapp.render_template_body(template["body"], params) or f"Template · {template['name']}"
     m = enqueue(db, conv, lead, sender_type="agent", kind="template", body=body,
                 request=whatsapp.template_payload(lead.phone_e164, template["name"], template["language"], params),

@@ -77,13 +77,194 @@ def test_no_consent_means_zero_messages(db, sent):
     assert db.scalar(select(func.count(Message.id))) == 0
 
 
-def test_unmapped_form_lead_saved_but_not_messaged(db, sent):
+def test_incomplete_lead_form_waits_until_details_are_filled(db, sent):
+    from app.api.serializers import needs_review
+
+    setup_mapped_form(db)
+    run_import(db, [row("1", email="", city="")], force=False)
+    drain()
+    lead = db.scalar(select(Lead))
+    assert sent == []  # incomplete: saved, but no WhatsApp message
+    assert any("missing email, city" in r for r in needs_review(lead))
+
+    # Only the email is added: still waiting for the city.
+    run_import(db, [row("1", city="")], force=False)
+    drain()
+    assert sent == []
+
+    # The row is now complete: the first message goes out automatically, exactly once.
+    run_import(db, [row("1")], force=False)
+    drain()
+    run_import(db, [row("1")], force=False)
+    drain()
+    db.refresh(lead)
+    assert len(sent) == 1 and sent[0]["type"] == "template"
+    assert (lead.email, lead.city) == ("t@example.com", "Bhubaneswar")
+    assert needs_review(lead) == []
+
+
+def test_consent_added_later_starts_conversation(db, sent):
+    setup_mapped_form(db)
+    run_import(db, [row("1", consent="")], force=False)
+    drain()
+    assert sent == []
+    run_import(db, [row("1", consent="yes")], force=False)
+    drain()
+    assert len(sent) == 1
+    assert db.scalar(select(Lead)).consent_status == "opted_in"
+
+
+def test_row_typed_cell_by_cell_is_one_lead_and_one_message(db, sent):
+    """Regression: typing time / form / lead ID after the phone used to create extra leads."""
+    setup_mapped_form(db)
+    r = row("50")
+    steps = [list(r) for _ in range(3)]
+    steps[0][0], steps[0][1] = "", ""          # no lead ID, no time yet
+    steps[1][0] = ""                            # time typed, still no lead ID
+    for s in steps[:2]:
+        run_import(db, [s], force=False)
+        drain()
+    assert db.scalar(select(func.count(Lead.id))) == 0 and sent == []  # not taken until the Lead ID is in
+    run_import(db, [steps[2]], force=False)     # last step: lead ID typed
+    drain()
+    assert db.scalar(select(func.count(Lead.id))) == 1
+    lead = db.scalar(select(Lead))
+    assert lead.external_lead_id == "50" and lead.dedupe_key == "meta:50"
+    assert len(sent) == 1
+
+
+def test_copied_row_uses_final_details_once_lead_id_is_entered(db, sent):
+    """Regression: a copied row was messaged with the old name/property before it was edited."""
+    setup_mapped_form(db)
+    run_import(db, [row("100")], force=False)        # an earlier enquiry (Test Buyer)
+    drain()
+    n = len(sent)
+    copy = row("100", name="Sid")
+    copy[0] = ""                                      # copied without its Lead ID
+    run_import(db, [row("100"), copy], force=False)
+    drain()
+    assert len(sent) == n and db.scalar(select(func.count(Lead.id))) == 1
+    final = row("101", name="Rajat")                  # edited, then the Lead ID entered last
+    final[5], final[11] = "SNN Manyata", "Villa / Independent house"
+    run_import(db, [row("100"), final], force=False)
+    drain()
+    lead = db.scalar(select(Lead).where(Lead.external_lead_id == "101"))
+    assert lead.full_name == "Rajat" and len(sent) == n + 1
+
+
+def test_new_enquiry_from_same_number_wins(db, sent):
+    setup_mapped_form(db)
+    run_import(db, [row("60")], force=False)
+    drain()
+    # Customer replies: the 24-hour window opens and the questions start on the first enquiry.
+    process_payload(db, inbound("wamid.in.60", WA, text="Hi", ts=str(int(time.time()))))
+    drain()
+    first = db.scalar(select(Lead).where(Lead.external_lead_id == "60"))
+    assert first.conversation.state == "asking"
+    intro = [p for p in sent if p["type"] == "interactive"][0]["interactive"]["body"]["text"]
+    assert "You mentioned: 3 BHK · 80 lakh" in intro
+
+    # A new enquiry from the same number (new lead ID, new row): no template needed inside the
+    # window; it opens with the enquiry details, and the older chat is closed.
+    n = len(sent)
+    newer = row("61")
+    newer[11] = "2 BHK"
+    run_import(db, [row("60"), newer], force=False)
+    drain()
+    db.refresh(first)
+    second = db.scalar(select(Lead).where(Lead.external_lead_id == "61"))
+    assert first.conversation.state == "closed"
+    assert second.conversation.state == "asking"
+    new_msgs = sent[n:]
+    assert len(new_msgs) == 1 and new_msgs[0]["type"] == "interactive"
+    text = new_msgs[0]["interactive"]["body"]["text"]
+    assert text.startswith("Hi Test 👋") and "*Your enquiry*\n🏠 2 BHK" in text
+
+    # Replies now belong to the newest enquiry.
+    process_payload(db, inbound("wamid.in.61", WA, text="1", ts=str(int(time.time()))))
+    db.refresh(second)
+    assert second.conversation.question_index == 1
+
+
+def test_friendly_sheet_headers_are_recognised(db, sent):
+    setup_mapped_form(db)
+    header = ["Submitted At", "Full Name", "Phone Number", "Email", "City", "Property", "WhatsApp Consent",
+              "Data Check", "Campaign", "Ad Name", "Platform", "Form ID", "Lead ID"]
+    data = ["2026-11-23T10:15:32+05:30", "Test Buyer", "+91 98123 45678", "t@example.com", "Bhubaneswar",
+            "Green Meadows Apartments", "yes", "Complete", "Camp", "Ad", "fb", "f:111", "l:77"]
+    b = importer.import_rows(db, [header, data], source_ref="t", triggered_by="t", force_batch=True)
+    drain()
+    lead = db.scalar(select(Lead))
+    assert b.rows_imported == 1 and lead.external_lead_id == "77" and lead.platform == "fb"
+    assert len(sent) == 1
+
+
+def test_unknown_form_without_looking_for_waits(db, sent):
+    """No mapping and nothing in the row says which questions to ask: saved, not messaged."""
     setup_mapped_form(db, external_form_id="111")
-    run_import(db, [row("1", form="f:999")])
+    r = row("1", form="f:999")
+    r[5], r[11] = "", ""  # no property name, no "Looking For"
+    run_import(db, [r])
     drain()
     lead = db.scalar(select(Lead))
     assert lead.form.external_form_id == "999" and not lead.form.is_mapped
+    assert lead.conversation.flow_id is None
     assert sent == []
+
+
+def test_unknown_form_uses_looking_for(db, sent):
+    setup_mapped_form(db, external_form_id="111")
+    r = row("1", form="f:999")
+    r[5], r[11] = "Skyline Towers", "Office space"
+    run_import(db, [r])
+    drain()
+    lead = db.scalar(select(Lead))
+    assert lead.prop is None and lead.conversation.flow.key == "commercial"
+    assert len(sent) == 1
+
+
+def test_flow_inferred_from_looking_for():
+    from app.services.importer import infer_flow_key
+
+    assert infer_flow_key("2 BHK") == "apartment"
+    assert infer_flow_key("Villa / Independent house") == "apartment"
+    assert infer_flow_key("Residential plot") == "plot"
+    assert infer_flow_key("Commercial plot") == "commercial"
+    assert infer_flow_key("Retail shop / Showroom") == "commercial"
+    assert infer_flow_key("something else") is None
+
+
+def test_messages_use_what_the_lead_form_says(db, sent):
+    """Form 111 is mapped to Green Meadows, but this row is about SNR Flats: use the row."""
+    setup_mapped_form(db)
+    r = row("70")
+    r[5], r[11], r[12] = "SNR Flats", "1 BHK", "Rent: under ₹30K / month"
+    header = [*HEADER, "Preferred Location", "Property Details"]
+    importer.import_rows(db, [header, [*r, "HSR Sector 1", "Semi-furnished"]], source_ref="t", triggered_by="t",
+                         force_batch=True)
+    drain()
+    lead = db.scalar(select(Lead))
+    assert lead.prop is None and lead.conversation.flow.key == "apartment"
+    process_payload(db, inbound("wamid.in.70", WA, text="Hi", ts=str(int(time.time()))))
+    drain()
+    text = [p for p in sent if p["type"] == "interactive"][0]["interactive"]["body"]["text"]
+    assert "SNR Flats" in text and "Green Meadows" not in text
+    for part in ("1 BHK", "Rent: under ₹30K / month", "HSR Sector 1", "Semi-furnished"):
+        assert part in text
+
+
+def test_edited_row_updates_lead_without_new_message(db, sent):
+    setup_mapped_form(db)
+    run_import(db, [row("80")], force=False)
+    drain()
+    edited = row("80")
+    edited[11], edited[12] = "2 BHK", "₹50–80 Lakh"
+    run_import(db, [edited], force=False)
+    drain()
+    lead = db.scalar(select(Lead))
+    db.refresh(lead)
+    assert (lead.interest, lead.budget_text) == ("2 BHK", "₹50–80 Lakh")
+    assert len(sent) == 1  # same enquiry: details updated, no second opening message
 
 
 def test_opening_template_sent_once_and_marks_contacted(db, sent):
@@ -226,7 +407,7 @@ def test_typed_answer_matches_and_gibberish_hands_off(db, sent):
     assert conv.state == "handoff" and conv.handoff_reason == "could_not_understand_reply"
 
 
-def test_stop_opts_out_and_blocks_everything(db, sent):
+def test_stop_ends_that_chat_only(db, sent):
     setup_mapped_form(db)
     run_import(db, [row("1")])
     drain()
@@ -234,13 +415,48 @@ def test_stop_opts_out_and_blocks_everything(db, sent):
     drain()
     lead = db.scalar(select(Lead))
     db.refresh(lead)
-    assert lead.consent_status == "opted_out"
-    assert db.scalar(select(func.count(Suppression.id))) == 1
-    assert "unsubscribed" in sent[-1]["text"]["body"]
+    assert lead.consent_status == "opted_out" and lead.conversation.state == "opted_out"
+    assert db.scalar(select(func.count(Suppression.id))) == 0  # the number itself is not blocked
+    assert "stopped this chat" in sent[-1]["text"]["body"]
     n = len(sent)
     process_payload(db, inbound("s2", WA, text="3 bhk", ts=str(int(time.time()))))
     drain()
-    assert len(sent) == n  # nothing more is ever sent
+    assert len(sent) == n  # nothing more in the stopped chat
+
+    # A new enquiry from the same number (new form submission with consent) starts a new chat.
+    run_import(db, [row("1"), row("2")], force=False)
+    drain()
+    newer = db.scalar(select(Lead).where(Lead.external_lead_id == "2"))
+    assert newer.conversation.state in ("template_sent", "asking") and len(sent) == n + 1
+
+
+def test_held_back_lead_is_messaged_automatically_once_ready(db, sent, monkeypatch):
+    """Regression: a lead imported while its number was blocked stayed un-messaged forever."""
+    from app.services import sheets
+    from app.services.phones import phone_hash
+
+    setup_mapped_form(db)
+    db.add(Suppression(phone_hash=phone_hash("+919812345678"), reason="whatsapp"))
+    db.commit()
+    rows = [HEADER, row("90")]
+    monkeypatch.setattr(sheets, "read_rows", lambda *a, **k: ("Leads", rows))
+    workers.run_sheet_sync("test")
+    drain()
+    assert sent == []  # held back: number blocked
+
+    db.query(Suppression).delete()
+    db.commit()
+    workers.run_sheet_sync("test")  # nothing new in the sheet, but the lead is now ready
+    drain()
+    workers.run_sheet_sync("test")
+    drain()
+    assert len(sent) == 1 and sent[0]["type"] == "template"
+
+
+def test_closing_message_says_stop_ends_this_chat():
+    from app.services.flows_default import CLOSING
+
+    assert CLOSING.endswith("Reply STOP anytime to end this chat.")
 
 
 def test_webhook_replayed_five_times_creates_one_message(db, sent):

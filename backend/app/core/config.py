@@ -46,6 +46,12 @@ class Settings(BaseSettings):
     google_sheet_id: str = ""
     google_sheet_tab: str = ""  # empty = first tab
     sheet_poll_seconds: int = Field(default=60, ge=15, le=3600)
+    # Secret for POST /webhooks/sheet (called by the sheet's Apps Script the moment a lead row is added).
+    # Empty = the instant trigger is off and only the regular check runs.
+    sheet_trigger_token: str = ""
+    # A sheet row is only taken once its Lead ID is filled (fill it last when typing a row by hand),
+    # so a half-typed or copied row is never messaged with the wrong details.
+    sheet_require_lead_id: bool = True
 
     # WhatsApp Cloud API
     whatsapp_api_version: str = "v23.0"

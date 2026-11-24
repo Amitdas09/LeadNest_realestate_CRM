@@ -12,7 +12,7 @@ tap-to-answer questionnaire, and land in your team's inbox already scored and as
 ![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)
 ![WhatsApp Cloud API](https://img.shields.io/badge/WhatsApp-Cloud%20API-25D366?logo=whatsapp&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-43%20passing-16A34A)
+![Tests](https://img.shields.io/badge/tests-62%20passing-16A34A)
 
 <img src="docs/screenshots/dashboard.png" alt="LeadNest dashboard" width="900" />
 
@@ -81,18 +81,27 @@ LeadNest automates the first conversation:
 ## Features
 
 **Lead capture**
-- Reads Meta lead-form rows from a Google Sheet every 60 seconds (read-only service account)
-- Editable column mapping; understands Meta export formats (`l:`, `f:`, `p:` prefixes)
+- Reads Meta lead-form rows from a Google Sheet **instantly** (an Apps Script trigger in the sheet calls
+  LeadNest the moment a row is complete) with a once-a-minute check as a safety net
+- A row is only taken once its **Lead ID** is filled, so half-typed or copied rows are never messaged
+- Clean sheet layout with plain-English headers, required-cell highlighting, dropdowns for
+  Looking For / Budget / Consent / Platform and a "How it works" tab (`python -m app.cli sheet-layout`)
+- Only **complete** rows (name, phone, email, city, consent) are messaged; filling a missing cell later
+  sends the message automatically, and editing a row updates its lead
 - Duplicate-proof: re-reading the same sheet never creates a second lead or message
-- Invalid rows (e.g. bad phone numbers) are reported in an Import Monitor without blocking good ones
+- **Sheet rows report**: every row with its result (messaged, delivery status, or the exact reason it
+  was not messaged), plus a summary on the dashboard
 
 **WhatsApp conversation**
 - Official **WhatsApp Business Cloud API** only — no unofficial automation
 - Approved opening template, then tap-to-answer questions (WhatsApp reply buttons)
-- Separate flows for apartments, plots and commercial property
+- Messages use what the lead form says (property, size, budget, location, details); the question flow
+  is chosen from "Looking For" (BHK -> apartment, plot -> plot, office/shop -> commercial)
+- A new enquiry from the same number takes over from the older one; inside the 24-hour window it
+  opens straight away with the enquiry details (no template needed)
 - Every button can route to a different next question, send its own reply, finish, or hand to a person
 - Verified property card (location, price range, possession) sent from the property record — never invented
-- `STOP` opts the customer out immediately; "call me" / "agent" hands the chat to a person
+- `STOP` ends that enquiry's chat immediately; "call me" / "agent" hands the chat to a person
 
 **Sales CRM**
 - Automatic **Hot / Warm / Cold** scoring, owner assignment and follow-up tasks
@@ -101,6 +110,8 @@ LeadNest automates the first conversation:
 - Agents can message outside WhatsApp's 24-hour window through an approved template
 - Lead profiles with a sales-stage tracker, editable requirements, internal notes and timeline
 - Dashboard: lead volume, qualification rate, response time, pipeline, property and agent performance
+- **Works on phones**: bottom tab bar, full-screen chats with take-over, lead cards, bottom-sheet
+  forms; installable on the home screen like an app
 
 **Administration**
 - Roles: admin, sales manager, sales agent
@@ -220,7 +231,7 @@ After the last answer, each lead is scored automatically (rules are editable in 
 | Messaging | WhatsApp Business Cloud API (Graph API) |
 | Lead source | Google Sheets API via a read-only service account |
 | Local infra | Docker Compose (PostgreSQL, Redis) |
-| Testing | pytest (43 tests against a real PostgreSQL database) |
+| Testing | pytest (62 tests against a real PostgreSQL database) |
 
 ---
 
@@ -244,7 +255,7 @@ leadnest/
 │       ├── pages/          # Dashboard, Leads, Conversations, LeadDetail, Forms, …
 │       ├── components/     # layout, UI kit, flow map, WhatsApp simulator
 │       └── lib/            # API client, auth, formatting, brand
-├── deploy/                 # production stack: compose file, Caddyfile, server setup script
+├── deploy/                 # production stack, server setup, image shipping, sheet trigger script
 ├── infra/docker-compose.yml # local development database
 ├── docs/                   # deployment guide and screenshots
 ├── Dockerfile              # production image (builds the CRM, runs the API)
@@ -314,6 +325,7 @@ and also opens a public HTTPS tunnel so WhatsApp replies reach your machine.
 LeadNest runs on a free **Oracle Cloud Always Free** server with Docker, Caddy (automatic HTTPS)
 and PostgreSQL — see **[docs/DEPLOY_ORACLE.md](docs/DEPLOY_ORACLE.md)** for the step-by-step guide.
 The production stack is in [`deploy/`](deploy/) and the image is built from the root `Dockerfile`.
+On a small 1 GB server, build on your PC and upload with `deploy/ship-image.ps1`.
 
 ### 6. Connect the WhatsApp webhook (local development)
 

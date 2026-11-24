@@ -26,6 +26,7 @@ from app.models import (
 from app.models.crm import LEAD_STATUSES
 from app.services import audit, signals
 from app.services.conversations import save_requirement, start_conversation
+from app.services.importer import form_answers
 from app.services.phones import normalize_phone
 
 router = APIRouter(prefix="/api/v1/leads", tags=["leads"])
@@ -80,8 +81,10 @@ def _chip(stmt, chip: str | None, user: User):
     if chip == "unread":
         return stmt.where(Conversation.unread_count > 0)
     if chip == "needs_review":
-        unmapped = select(LeadForm.id).where(or_(LeadForm.property_id.is_(None), LeadForm.flow_id.is_(None)))
-        return stmt.where(or_(Lead.consent_status == "unknown", Lead.form_id.in_(unmapped),
+        no_flow = and_(Lead.source == "sheet", Conversation.state == "new", Conversation.flow_id.is_(None))
+        incomplete = and_(Lead.source == "sheet", Conversation.state == "new",
+                          or_(Lead.email.is_(None), Lead.email == "", Lead.city.is_(None), Lead.city == ""))
+        return stmt.where(or_(Lead.consent_status == "unknown", no_flow, incomplete,
                               and_(Conversation.state == "handoff", Conversation.mode == "bot")))
     if chip == "hot":
         return stmt.where(Lead.priority == "hot")
@@ -190,6 +193,9 @@ def lead_detail(lead_id: uuid.UUID, db: Session = Depends(get_db), user: User = 
         "import_batch_id": lead.import_batch_id, "source_row": lead.source_row,
         "source_created_at": lead.source_created_at, "first_response_at": lead.first_response_at,
         "status_reason": lead.status_reason, "raw": lead.raw,
+        "form_answers": form_answers(lead.raw) or [
+            {"label": k, "value": v} for k, v in (("Looking for", lead.interest), ("Budget", lead.budget_text),
+                                                  ("Plans to buy", lead.timeline_text)) if v],
         "allowed_statuses": sorted(TRANSITIONS.get(lead.status, set())),
         "requirements": [
             {"field_key": r.field_key, "label": r.label, "value": r.value, "display": r.display, "source": r.source,

@@ -36,7 +36,7 @@ export default function Properties() {
   const up = (k: string) => (e: any) => setF({ ...f, [k]: e.target.value });
 
   return (
-    <div className="mx-auto max-w-[1440px] p-6">
+    <div className="mx-auto max-w-[1440px] p-4 sm:p-6">
       <PageHeader title="Properties" subtitle="Verified details the WhatsApp assistant shares with customers. Starting price is also used in lead scoring."
         actions={<Button onClick={() => setSelected("new")}><Plus className="h-4 w-4" /> Add property</Button>} />
       {q.isLoading ? <Loading /> : (

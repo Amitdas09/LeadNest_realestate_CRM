@@ -24,6 +24,7 @@ from app.services.conversations import send_block_reason
 
 log = logging.getLogger(__name__)
 SHEET_LOCK_ID = 7_001_001
+MIN_SYNC_GAP_SECONDS = 3
 
 
 def _set_state(db: Session, key: str, value: dict) -> None:
@@ -66,6 +67,8 @@ def _sync_locked(triggered_by: str, force_batch: bool) -> ImportBatch | None:
             return None
         batch = importer.import_rows(db, rows, source_ref=f"{settings.google_sheet_id}/{tab}",
                                      triggered_by=triggered_by, force_batch=force_batch)
+        # Leads that became ready since they were imported get their first message now.
+        importer.start_waiting(db)
         _set_state(db, "sheet_sync", {"ok": True, "at": started, "tab": tab, "rows": max(len(rows) - 1, 0),
                                       "last_batch": batch.id if batch else None})
         db.commit()
@@ -143,14 +146,21 @@ class Workers:
             t.join(timeout=5)
 
     def _poller(self) -> None:
+        """Check the sheet every N seconds, and immediately when the sheet's trigger fires.
+
+        When nothing is new the check does nothing (no batch, no messages). A short gap between
+        back-to-back checks keeps a burst of edits within Google's read limits.
+        """
         settings = get_settings()
+        triggered = False
         while not self._stop.is_set():
             if settings.sheets_configured:
                 try:
-                    run_sheet_sync("poller")
+                    run_sheet_sync("sheet_trigger" if triggered else "poller")
                 except Exception:
                     log.exception("Sheet sync failed")
-            signals.sync_event.wait(settings.sheet_poll_seconds)
+            self._stop.wait(MIN_SYNC_GAP_SECONDS)
+            triggered = signals.sync_event.wait(settings.sheet_poll_seconds)
             signals.sync_event.clear()
 
     def _dispatcher(self) -> None:

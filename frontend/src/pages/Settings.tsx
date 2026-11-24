@@ -12,7 +12,7 @@ export default function SettingsPage() {
   const tabs = user?.role === "admin" ? ["Integrations", "Users and roles", "Audit log"] : ["Integrations", "Audit log"];
   const [tab, setTab] = useState(tabs[0]);
   return (
-    <div className="mx-auto max-w-[1440px] p-6">
+    <div className="mx-auto max-w-[1440px] p-4 sm:p-6">
       <PageHeader title="Settings" subtitle="Integrations, team and audit. Secrets stay on the server and are never shown here."
         actions={<Tabs value={tab} onChange={setTab} items={tabs.map((t) => ({ value: t, label: t }))} />} />
       {tab === "Integrations" && <Integrations />}

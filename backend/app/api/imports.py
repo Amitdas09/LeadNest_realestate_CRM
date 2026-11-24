@@ -9,6 +9,7 @@ from app.core.config import get_settings
 from app.core.db import get_db
 from app.models import AppState, ImportBatch, ImportRowError, Role, User
 from app.services import audit, sheets, workers
+from app.services.sheet_report import build_report
 
 router = APIRouter(prefix="/api/v1/imports", tags=["imports"])
 staff = require_roles(Role.ADMIN, Role.MANAGER)
@@ -42,6 +43,12 @@ def overview(limit: int = Query(30, ge=1, le=200), db: Session = Depends(get_db)
         "last_24h": {"batches": agg[0], "imported": agg[1], "duplicates": agg[2], "errors": agg[3]},
         "batches": [_batch(b) for b in db.scalars(select(ImportBatch).order_by(ImportBatch.id.desc()).limit(limit))],
     }
+
+
+@router.get("/sheet-report")
+def sheet_report(db: Session = Depends(get_db), _: User = Depends(staff)):
+    """Every sheet row: messaged or not, delivery status, and the reason when it was not messaged."""
+    return build_report(db)
 
 
 @router.get("/{batch_id}/errors")

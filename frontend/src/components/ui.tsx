@@ -15,7 +15,7 @@ export function Button({ variant = "primary", size = "md", loading, className, c
       disabled={rest.disabled || loading}
       className={clsx(
         "inline-flex shrink-0 select-none items-center justify-center gap-1.5 whitespace-nowrap rounded-lg font-semibold transition-colors duration-150 disabled:pointer-events-none disabled:opacity-50",
-        size === "sm" ? "h-8 px-2.5 text-xs" : "h-9 px-3.5 text-sm",
+        size === "sm" ? "h-9 px-3 text-xs sm:h-8 sm:px-2.5" : "h-10 px-3.5 text-sm sm:h-9",
         variant === "primary" && "bg-brand-700 text-white shadow-xs hover:bg-brand-800",
         variant === "violet" && "bg-violet-600 text-white shadow-xs hover:bg-violet-700",
         variant === "secondary" && "border border-line-strong bg-white text-ink-2 shadow-xs hover:bg-slate-50 hover:text-ink",
@@ -34,7 +34,7 @@ export function Button({ variant = "primary", size = "md", loading, className, c
 export function IconButton({ label, className, children, ...rest }: React.ButtonHTMLAttributes<HTMLButtonElement> & { label: string }) {
   return (
     <button type="button" aria-label={label} title={label} {...rest}
-      className={clsx("inline-flex h-8 w-8 items-center justify-center rounded-lg text-ink-3 transition-colors hover:bg-slate-100 hover:text-ink disabled:opacity-40", className)}>
+      className={clsx("inline-flex h-10 w-10 items-center justify-center rounded-lg text-ink-3 sm:h-8 sm:w-8 transition-colors hover:bg-slate-100 hover:text-ink disabled:opacity-40", className)}>
       {children}
     </button>
   );
@@ -45,7 +45,7 @@ export function IconButton({ label, className, children, ...rest }: React.Button
 export function Card({ title, subtitle, action, children, className, bodyClass, icon }:
   { title?: ReactNode; subtitle?: ReactNode; action?: ReactNode; children: ReactNode; className?: string; bodyClass?: string; icon?: ReactNode }) {
   return (
-    <section className={clsx("card", className)}>
+    <section className={clsx("card min-w-0", className)}>
       {(title || action) && (
         <header className="flex items-center justify-between gap-3 border-b border-line px-4 py-3">
           <div className="flex min-w-0 items-center gap-2">
@@ -65,10 +65,10 @@ export function Card({ title, subtitle, action, children, className, bodyClass, 
 
 export function PageHeader({ title, subtitle, actions, eyebrow }: { title: string; subtitle?: ReactNode; actions?: ReactNode; eyebrow?: ReactNode }) {
   return (
-    <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
+    <div className="mb-4 flex flex-wrap items-end justify-between gap-3 sm:mb-5">
       <div className="min-w-0">
         {eyebrow && <div className="mb-1 text-xs font-medium text-ink-3">{eyebrow}</div>}
-        <h1 className="text-[22px] font-semibold leading-tight tracking-tight text-ink">{title}</h1>
+        <h1 className="text-xl font-semibold leading-tight tracking-tight text-ink sm:text-[22px]">{title}</h1>
         {subtitle && <p className="mt-0.5 text-sm text-ink-3">{subtitle}</p>}
       </div>
       {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
@@ -84,7 +84,7 @@ export function StatCard({ label, value, hint, icon, tone = "brand", onClick }:
     blue: "bg-sky-50 text-sky-700", violet: "bg-violet-50 text-violet-700", slate: "bg-slate-100 text-ink-3" };
   const Tag: any = onClick ? "button" : "div";
   return (
-    <Tag onClick={onClick} className={clsx("flex w-full flex-col rounded-xl border border-line bg-white p-4 text-left shadow-xs transition-colors", onClick && "hover:border-line-strong hover:bg-slate-50/50")}>
+    <Tag onClick={onClick} className={clsx("flex w-full min-w-0 flex-col rounded-xl border border-line bg-white p-3.5 text-left shadow-xs transition-colors sm:p-4", onClick && "hover:border-line-strong hover:bg-slate-50/50")}>
       <div className="flex items-center justify-between gap-2">
         <p className="text-[13px] font-medium text-ink-3">{label}</p>
         {icon && <span className={clsx("flex h-7 w-7 items-center justify-center rounded-md", tones[tone])}>{icon}</span>}
@@ -108,7 +108,7 @@ export function Eyebrow({ children, className }: { children: ReactNode; classNam
 export function Tabs<T extends string>({ value, onChange, items, className, size = "md" }:
   { value: T; onChange: (v: T) => void; items: { value: T; label: ReactNode; count?: number }[]; className?: string; size?: "sm" | "md" }) {
   return (
-    <div role="tablist" className={clsx("inline-flex items-center gap-0.5 rounded-xl bg-slate-100 p-1", className)}>
+    <div role="tablist" className={clsx("no-scrollbar inline-flex max-w-full items-center gap-0.5 overflow-x-auto rounded-xl bg-slate-100 p-1", className)}>
       {items.map((i) => (
         <button key={i.value} role="tab" aria-selected={value === i.value} data-active={value === i.value} onClick={() => onChange(i.value)}
           className={clsx("chip-tab", size === "sm" && "h-7 flex-1 justify-center px-2")}>
@@ -250,13 +250,16 @@ export function Modal({ open, title, onClose, children, width = "max-w-lg", desc
   }, [open, onClose]);
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/50 p-4 pt-[10vh] backdrop-blur-[2px]" onMouseDown={onClose}>
-      <div role="dialog" aria-modal="true" aria-label={title} className={clsx("w-full animate-fade-up rounded-2xl bg-white shadow-pop", width)} onMouseDown={(e) => e.stopPropagation()}>
-        <div className="flex items-start justify-between gap-4 px-6 pb-2 pt-5">
+    // Phone: a bottom sheet that can scroll; larger screens: a centred dialog.
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/50 backdrop-blur-[2px] sm:items-start sm:overflow-y-auto sm:p-4 sm:pt-[10vh]" onMouseDown={onClose}>
+      <div role="dialog" aria-modal="true" aria-label={title}
+        className={clsx("flex max-h-[92dvh] w-full animate-fade-up flex-col rounded-t-2xl bg-white shadow-pop sm:max-h-none sm:rounded-2xl", width)}
+        onMouseDown={(e) => e.stopPropagation()}>
+        <div className="flex shrink-0 items-start justify-between gap-4 px-5 pb-2 pt-4 sm:px-6 sm:pt-5">
           <div><h2 className="text-base font-semibold text-ink">{title}</h2>{description && <p className="mt-0.5 text-sm text-ink-3">{description}</p>}</div>
           <IconButton label="Close" onClick={onClose}><X className="h-4 w-4" /></IconButton>
         </div>
-        <div className="px-6 pb-6 pt-3">{children}</div>
+        <div className="overflow-y-auto px-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] pt-3 sm:px-6 sm:pb-6">{children}</div>
       </div>
     </div>
   );
@@ -298,9 +301,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastCtx.Provider value={push}>
       {children}
-      <div aria-live="polite" className="pointer-events-none fixed bottom-5 right-5 z-[60] flex flex-col gap-2">
+      <div aria-live="polite" className="pointer-events-none fixed inset-x-4 bottom-20 z-[60] flex flex-col items-center gap-2 sm:inset-x-auto sm:bottom-5 sm:right-5 sm:items-end">
         {toasts.map((t) => (
-          <div key={t.id} className={clsx("pointer-events-auto flex max-w-sm animate-fade-up items-start gap-2 rounded-xl px-4 py-3 text-sm font-medium text-white shadow-pop", t.kind === "ok" ? "bg-ink" : "bg-red-600")}>
+          <div key={t.id} className={clsx("pointer-events-auto flex w-full max-w-sm animate-fade-up items-start gap-2 rounded-xl px-4 py-3 text-sm font-medium text-white shadow-pop", t.kind === "ok" ? "bg-ink" : "bg-red-600")}>
             {t.kind === "error" && <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />}{t.text}
           </div>
         ))}

@@ -33,7 +33,7 @@ export default function FollowUps() {
   const sections = status === "open" ? group(q.data?.items || []) : { Completed: q.data?.items || [] };
 
   return (
-    <div className="mx-auto max-w-5xl p-6">
+    <div className="mx-auto max-w-5xl p-4 sm:p-6">
       <PageHeader title="Follow-ups" subtitle="Created automatically when a lead qualifies or asks for a person — plus any you schedule."
         actions={<>
           {isManager(user) && <Tabs value={scope} onChange={setScope} items={[{ value: "mine", label: "Mine" }, { value: "all", label: "Everyone" }]} />}

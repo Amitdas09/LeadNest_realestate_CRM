@@ -5,15 +5,25 @@
 set -e
 
 echo "==> Installing Docker"
+export DEBIAN_FRONTEND=noninteractive
+echo iptables-persistent iptables-persistent/autosave_v4 boolean true | sudo debconf-set-selections
+echo iptables-persistent iptables-persistent/autosave_v6 boolean true | sudo debconf-set-selections
 sudo apt-get update -y
 sudo apt-get install -y docker.io docker-compose-v2 git iptables-persistent
 sudo systemctl enable --now docker
 sudo usermod -aG docker "$USER"
 
 echo "==> Opening ports 80 and 443 (Oracle's Ubuntu image blocks them by default)"
-for port in 80 443; do
-  sudo iptables -C INPUT -p tcp --dport "$port" -j ACCEPT 2>/dev/null || \
-    sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport "$port" -j ACCEPT
+# Insert the rules just above Oracle's catch-all REJECT rule (its position differs between images).
+for port in 443 80; do
+  if ! sudo iptables -C INPUT -m state --state NEW -p tcp --dport "$port" -j ACCEPT 2>/dev/null; then
+    pos=$(sudo iptables -L INPUT --line-numbers -n | awk '/REJECT/{print $1; exit}')
+    if [ -n "$pos" ]; then
+      sudo iptables -I INPUT "$pos" -m state --state NEW -p tcp --dport "$port" -j ACCEPT
+    else
+      sudo iptables -A INPUT -m state --state NEW -p tcp --dport "$port" -j ACCEPT
+    fi
+  fi
 done
 sudo netfilter-persistent save
 

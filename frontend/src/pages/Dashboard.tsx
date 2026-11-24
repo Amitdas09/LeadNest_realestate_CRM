@@ -1,18 +1,37 @@
 import { useQuery } from "@tanstack/react-query";
 import clsx from "clsx";
-import { Building2, CalendarClock, CheckCircle2, Flame, MessageSquare, Timer, UserPlus, Users } from "lucide-react";
+import { Building2, CalendarClock, CheckCircle2, ChevronRight, Flame, MessageSquare, Sheet, Timer, UserPlus, Users } from "lucide-react";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Avatar, Card, Empty, ErrorBox, PageHeader, Skeleton, StatCard, Tabs } from "../components/ui";
 import { api } from "../lib/api";
-import { useAuth } from "../lib/auth";
+import { isManager, useAuth } from "../lib/auth";
 import { ACTION_LABEL, STATUS_LABEL, timeAgo } from "../lib/format";
 
 const PIPE_COLOR: Record<string, string> = {
   new: "bg-blue-500", contacted: "bg-slate-400", qualified: "bg-emerald-500", site_visit: "bg-violet-500",
   negotiation: "bg-amber-500", won: "bg-green-600", lost: "bg-red-400", nurture: "bg-orange-400",
 };
+
+/** Sheet → WhatsApp at a glance; tapping opens the row-by-row report. */
+function SheetSummary() {
+  const r = useQuery({ queryKey: ["sheet-report"], queryFn: () => api("/api/v1/imports/sheet-report"), refetchInterval: 30000 });
+  if (!r.data) return null;
+  const s = r.data.summary;
+  const problems = s.not_messaged + s.failed + s.not_imported;
+  const parts: [string, number, string][] = [["messaged", s.messaged, "text-emerald-700"], ["not messaged", s.not_messaged, "text-amber-700"],
+    ["failed", s.failed, "text-red-600"], ["not imported", s.not_imported, "text-red-600"], ["waiting", s.waiting, "text-sky-700"]];
+  return (
+    <Link to="/imports" className={clsx("mb-4 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border px-4 py-3 text-sm transition-colors",
+      problems ? "border-amber-200 bg-amber-50/70 hover:bg-amber-50" : "border-brand-100 bg-brand-50/60 hover:bg-brand-50")}>
+      <span className="flex items-center gap-2 font-semibold text-ink"><Sheet className="h-4 w-4 text-brand-700" /> Sheet → WhatsApp</span>
+      <span className="text-ink-3">{r.data.total} rows</span>
+      {parts.filter(([, n]) => n > 0).map(([label, n, cls]) => <span key={label} className={clsx("font-medium", cls)}>{n} {label}</span>)}
+      <span className="ml-auto flex items-center gap-1 text-xs font-semibold text-brand-700">See every row <ChevronRight className="h-3.5 w-3.5" /></span>
+    </Link>
+  );
+}
 
 export default function Dashboard() {
   const nav = useNavigate();
@@ -25,16 +44,17 @@ export default function Dashboard() {
   });
 
   return (
-    <div className="mx-auto max-w-[1440px] p-6">
+    <div className="mx-auto max-w-[1440px] p-4 sm:p-6">
       <PageHeader title={`Welcome back, ${user?.full_name?.split(" ")[0] || ""}`}
         subtitle={`${new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" })} · Lead activity across all properties`}
         actions={<Tabs value={days} onChange={setDays} items={[{ value: "7", label: "Last 7 days" }, { value: "30", label: "Last 30 days" }, { value: "90", label: "Last 90 days" }]} />} />
       <ErrorBox error={error} />
+      {isManager(user) && <SheetSummary />}
       {isLoading || !data ? (
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-6">{Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-[108px] rounded-xl" />)}</div>
+        <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3 xl:grid-cols-6">{Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-[108px] rounded-xl" />)}</div>
       ) : (
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-6">
+          <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3 xl:grid-cols-6">
             <StatCard label="Total leads" value={data.kpis.total} icon={<Users className="h-4 w-4" />} hint={`In the last ${days} days`} onClick={() => nav("/leads")} />
             <StatCard label="New today" value={data.kpis.new_today} icon={<UserPlus className="h-4 w-4" />} hint="Since midnight" onClick={() => nav("/leads?sort=created")} />
             <StatCard label="Qualified" value={data.kpis.total ? `${Math.round((100 * data.kpis.qualified) / data.kpis.total)}%` : "0%"}
@@ -47,7 +67,7 @@ export default function Dashboard() {
 
           <div className="grid gap-4 xl:grid-cols-3">
             <Card title="Lead volume" subtitle="Daily new and qualified leads" className="xl:col-span-2"
-              action={<div className="flex items-center gap-4 text-xs text-ink-3">
+              action={<div className="hidden items-center gap-4 text-xs text-ink-3 sm:flex">
                 <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-brand-600" />Leads</span>
                 <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-forest" />Qualified</span>
               </div>}>

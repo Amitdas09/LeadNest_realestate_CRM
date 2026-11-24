@@ -3,6 +3,9 @@
 @tailwind utilities;
 
 html, body, #root { height: 100%; }
+/* App height that follows the phone's visible area (address bar / keyboard aware where supported). */
+.h-app { height: 100vh; height: 100dvh; }
+html { -webkit-tap-highlight-color: transparent; }
 body {
   @apply bg-canvas text-ink antialiased;
   font-size: 14px;
@@ -18,8 +21,9 @@ button, a, select, [role="button"], summary { cursor: pointer; }
 button:disabled, select:disabled { cursor: not-allowed; }
 
 @layer components {
+  /* 16px text on phones stops iOS from zooming into a field when it is tapped. */
   .input {
-    @apply h-9 w-full rounded-lg border border-line-strong bg-white px-3 text-sm text-ink placeholder:text-ink-4
+    @apply h-10 w-full rounded-lg border border-line-strong bg-white px-3 text-base text-ink placeholder:text-ink-4 sm:h-9 sm:text-sm
            transition-colors duration-150 hover:border-ink-4 focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-600/20
            disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-ink-3;
   }
@@ -33,10 +37,10 @@ button:disabled, select:disabled { cursor: not-allowed; }
     background-size: 14px;
   }
   .label { @apply mb-1.5 block text-xs font-medium text-ink-2; }
-  .th { @apply sticky top-0 z-10 bg-white px-4 py-2.5 text-left text-xs font-medium text-ink-3; }
-  .td { @apply px-4 py-3 align-middle text-sm; }
+  .th { @apply sticky top-0 z-10 bg-white px-3 py-2.5 text-left text-xs font-medium text-ink-3 sm:px-4; }
+  .td { @apply px-3 py-3 align-middle text-sm sm:px-4; }
   .card { @apply rounded-xl border border-line bg-white shadow-xs; }
-  .chip-tab { @apply inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs font-medium text-ink-3 transition-colors hover:bg-white hover:text-ink; }
+  .chip-tab { @apply inline-flex h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-3 text-xs font-medium text-ink-3 transition-colors hover:bg-white hover:text-ink sm:h-8; }
   .chip-tab[data-active="true"] { @apply bg-white text-ink shadow-xs ring-1 ring-line; }
   .skeleton { @apply relative overflow-hidden rounded-md bg-slate-100; }
   .skeleton::after { content: ""; @apply absolute inset-0 -translate-x-full animate-shimmer bg-gradient-to-r from-transparent via-white/70 to-transparent; }
@@ -65,6 +69,10 @@ button:disabled, select:disabled { cursor: not-allowed; }
   background-image: radial-gradient(rgba(0,0,0,0.03) 1px, transparent 1px);
   background-size: 16px 16px;
 }
+
+/* Horizontal strips (tabs, chips) that scroll sideways on small screens without a visible bar. */
+.no-scrollbar { scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
 
 /* Thin, quiet scrollbars in panes */
 .scroll-thin { scrollbar-width: thin; scrollbar-color: #d9d5ce transparent; }

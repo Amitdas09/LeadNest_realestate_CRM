@@ -75,7 +75,7 @@ CLOSING = (
     "Thank you, {name}! 🙏 We've noted your requirements.\n\n"
     "Our team will reach out to you within the next 24 hours. "
     "We're available 24/7 — just reply here anytime if you have a question.\n\n"
-    "Reply STOP to stop messages."
+    "Reply STOP anytime to end this chat."
 )
 
 DEFAULT_FLOWS = [

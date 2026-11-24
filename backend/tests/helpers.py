@@ -12,9 +12,9 @@ _seq = itertools.count(1)
 
 
 def row(lead_id: str, phone: str = "p:+919812345678", form: str = "f:111", consent: str = "yes",
-        name: str = "Test Buyer") -> list[str]:
+        name: str = "Test Buyer", email: str = "t@example.com", city: str = "Bhubaneswar") -> list[str]:
     return [f"l:{lead_id}", "2026-11-23T10:15:32+05:30", "Camp", "Ad", form, "Green Meadows Apartments", "fb",
-            name, phone, "t@example.com", "Bhubaneswar", "3 BHK", "80 lakh", "within 3 months", consent]
+            name, phone, email, city, "3 BHK", "80 lakh", "within 3 months", consent]
 
 
 def setup_mapped_form(db, external_form_id: str = "111", flow_key: str = "apartment",
