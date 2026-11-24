@@ -244,8 +244,10 @@ leadnest/
 │       ├── pages/          # Dashboard, Leads, Conversations, LeadDetail, Forms, …
 │       ├── components/     # layout, UI kit, flow map, WhatsApp simulator
 │       └── lib/            # API client, auth, formatting, brand
-├── infra/docker-compose.yml
-├── docs/screenshots/
+├── deploy/                 # production stack: compose file, Caddyfile, server setup script
+├── infra/docker-compose.yml # local development database
+├── docs/                   # deployment guide and screenshots
+├── Dockerfile              # production image (builds the CRM, runs the API)
 ├── start.ps1               # one-command local start (Windows)
 └── .env.example
 ```
@@ -307,7 +309,13 @@ cd backend
 Open **http://127.0.0.1:8000** and sign in. On Windows, `./start.ps1 -Tunnel` does steps 2 and 5
 and also opens a public HTTPS tunnel so WhatsApp replies reach your machine.
 
-### 6. Connect the WhatsApp webhook
+### Deploy for free
+
+LeadNest runs on a free **Oracle Cloud Always Free** server with Docker, Caddy (automatic HTTPS)
+and PostgreSQL — see **[docs/DEPLOY_ORACLE.md](docs/DEPLOY_ORACLE.md)** for the step-by-step guide.
+The production stack is in [`deploy/`](deploy/) and the image is built from the root `Dockerfile`.
+
+### 6. Connect the WhatsApp webhook (local development)
 
 Meta needs a public HTTPS URL. During development, run the tunnel keeper — it opens a tunnel and
 re-registers the webhook with Meta whenever the address changes:

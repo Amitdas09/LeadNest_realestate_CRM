@@ -1,5 +1,7 @@
 # Secrets and local config — never commit
 .env
+.env.*
+!.env.example
 *.env.local
 service-account*.json
 secrets/

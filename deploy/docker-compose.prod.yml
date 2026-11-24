@@ -1,0 +1,56 @@
+# Production stack for a single server (e.g. Oracle Cloud Always Free).
+#   cd ~/leadnest && docker compose -f deploy/docker-compose.prod.yml --env-file .env.production up -d --build
+#
+# Only Caddy is reachable from the internet (ports 80/443). PostgreSQL stays private.
+name: leadnest
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: leadnest
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.production}
+      POSTGRES_DB: leadnest
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U leadnest -d leadnest"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  app:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: ../.env.production
+    environment:
+      DATABASE_URL: postgresql+psycopg://leadnest:${POSTGRES_PASSWORD}@db:5432/leadnest
+      CORS_ORIGINS: '["https://${DOMAIN}"]'
+    volumes:
+      - ../secrets:/app/secrets:ro      # google-service-account.json + whatsapp.env
+    depends_on:
+      db:
+        condition: service_healthy
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env.production}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:
